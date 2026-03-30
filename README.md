@@ -19,18 +19,26 @@ Follow the prompts to select and download a distro.
 
 ## Supported Distros
 See `config/distros.conf` for the full list. Currently includes:
-- Debian 13 Trixie Netinstall
-- Debian 12 Bookworm Netinstall
-- Arch Linux
-- CachyOS Desktop
-- Linux Mint 22.3 Cinnamon
-- Pop!_OS 24.04
-- Ubuntu 24.04 Desktop
-- Fedora 43 Workstation
-- NixOS 25.11 Minimal
-- FreeBSD 15.0
-- openSUSE Tumbleweed
-- Alpine Linux 3.23.3
+
+- Debian 13 Trixie Netinstall  
+- Debian 12 Bookworm Netinstall  
+- Arch Linux  
+- CachyOS Desktop  
+- Linux Mint 22.3 Cinnamon  
+- Pop!_OS 24.04  
+- Ubuntu 24.04 Desktop  
+- Ubuntu 24.04 LTS Server  
+- Fedora 43 Workstation  
+- NixOS 25.11 Minimal  
+- FreeBSD 15.0  
+- NetBSD 10.1  
+- openSUSE Tumbleweed  
+- Alpine Linux 3.23.3  
+- Void Linux  
+- Gentoo Minimal  
+- Gentoo LiveGUI  
+- Kali Linux 2025.4  
+- System Rescue  
 
 ## Project Structure
 ```
