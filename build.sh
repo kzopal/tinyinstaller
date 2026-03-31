@@ -91,17 +91,21 @@ echo "[5/7] Creating init script..."
 cat > "$INITRD_DIR/init" << 'INITEOF'
 #!/bin/busybox sh
 
-/bin/busybox mount -t proc none /proc
-/bin/busybox mount -t sysfs none /sys
-/bin/busybox mount -t devtmpfs none /dev || /bin/busybox mdev -s
-
 # DNS fallback
 echo "nameserver 1.1.1.1" > /etc/resolv.conf
 
-# load modules
+# Mount /proc, /sys, /dev
+/bin/busybox mount -t proc none /proc
+/bin/busybox mount -t sysfs none /sys
+/bin/busybox mount -t devtmpfs none /dev || true
+/bin/busybox mdev -s || true
+[ -x /sbin/udevadm ] && udevadm trigger && udevadm settle || true
+sleep 2  # allow devices to settle
+
+# load modules safely
 for m in /sys/bus/*/devices/*/modalias; do
   [ -f "$m" ] || continue
-  modprobe "$(cat "$m")" 2>/dev/null
+  modprobe "$(cat "$m")" 2>/dev/null || true
 done
 
 # bring interfaces up
