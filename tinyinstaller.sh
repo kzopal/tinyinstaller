@@ -2,46 +2,49 @@
 # tinyinstaller - minimal network ISO installer
 # License: AGPL-3.0
 
-echo "================================"
-echo "       TinyInstaller v0.1       "
-echo "================================"
+set -eu
 
-# Dynamically load drivers for all detected network hardware
-echo "Probing network hardware..."
+ echo "================================"
+ echo "       TinyInstaller v0.1       "
+ echo "================================"
 
-# PCI devices (covers physical, QEMU, VirtualBox, VMware)
-for modalias in /sys/bus/pci/devices/*/modalias; do
-  [ -f "$modalias" ] && modprobe -q $(cat "$modalias") 2>/dev/null
+# --- Load kernel modules safely ---
+echo "Probing hardware..."
+
+if ! lsmod | grep -q .; then
+  depmod -a "$(uname -r)" 2>/dev/null || true
+fi
+
+for modalias in /sys/bus/*/devices/*/modalias; do
+  [ -f "$modalias" ] || continue
+  alias=$(cat "$modalias" 2>/dev/null || true)
+  [ -n "$alias" ] && modprobe -q "$alias" 2>/dev/null || true
 done
 
-# USB devices (USB WiFi dongles, USB-to-Ethernet adapters)
-for modalias in /sys/bus/usb/devices/*/modalias; do
-  [ -f "$modalias" ] && modprobe -q $(cat "$modalias") 2>/dev/null
-done
-
-# Platform/virtio devices (some ARM boards, VirtIO-only guests)
-for modalias in /sys/bus/platform/devices/*/modalias; do
-  [ -f "$modalias" ] && modprobe -q $(cat "$modalias") 2>/dev/null
-done
-
-# Wait for kernel to register new interfaces
+# settle devices
 sleep 2
-[ -x /sbin/mdev ] && mdev -s
-[ -x /sbin/udevadm ] && udevadm trigger && udevadm settle
+[ -x /sbin/mdev ] && mdev -s || true
+[ -x /sbin/udevadm ] && udevadm trigger && udevadm settle || true
 
-# Explicitly bring up any newly appeared interfaces so they show in /sys/class/net/
-for iface in /sys/class/net/*/; do
+# bring up interfaces
+for iface in /sys/class/net/*; do
   iface=$(basename "$iface")
-  [ "$iface" = "lo" ] || [ "$iface" = "*" ] && continue
-  ip link set "$iface" up 2>/dev/null
+  [ "$iface" = "lo" ] && continue
+  ip link set "$iface" up 2>/dev/null || true
 done
 
-# Detect and select network interface
+# --- Connectivity check (early fail) ---
+if ! ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; then
+  echo "No internet."
+fi
+
+# --- Interface selection ---
 echo ""
 echo "Available network interfaces:"
 echo "================================"
 i=1
-for iface in $(ls /sys/class/net/); do
+for iface in /sys/class/net/*; do
+  iface=$(basename "$iface")
   [ "$iface" = "lo" ] && continue
   echo "$i) $iface"
   eval "IFACE_$i=$iface"
@@ -52,58 +55,57 @@ printf "Choose interface number: "
 read IFACE_CHOICE
 NET_IF=$(eval echo \$IFACE_$IFACE_CHOICE)
 
-if [ -z "$NET_IF" ]; then
-  echo "Invalid choice. Exiting."
-  exit 1
-fi
+[ -z "$NET_IF" ] && echo "Invalid choice." && exit 1
 
 echo "Selected: $NET_IF"
 
-# If WiFi, ask for credentials
-if echo "$NET_IF" | grep -qE "^wl"; then
-  echo "WiFi interface detected."
-  printf "Enter WiFi SSID: "
-  read SSID
-  printf "Enter WiFi password: "
-  read PASS
-  echo ""
-  wpa_passphrase "$SSID" "$PASS" > /tmp/wpa.conf
-  wpa_supplicant -B -i "$NET_IF" -c /tmp/wpa.conf
-  sleep 3
-fi
+# WiFi handling
+case "$NET_IF" in
+  wl*)
+    printf "SSID: "
+    read SSID
+    printf "Password: "
+    read PASS
+    wpa_passphrase "$SSID" "$PASS" > /tmp/wpa.conf
+    wpa_supplicant -B -i "$NET_IF" -c /tmp/wpa.conf
+    sleep 3
+    ;;
+esac
 
-ip link set "$NET_IF" up
+ip link set "$NET_IF" up || true
 udhcpc -i "$NET_IF" -q -t 10
 
-# Test connectivity
-echo "Testing internet connection..."
-if ! wget -q --spider http://google.com; then
-  echo "Error: No internet connection. Exiting."
+# --- Connectivity test ---
+echo "Testing internet..."
+if ! ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; then
+  echo "Error: No internet connection."
   exit 1
 fi
+
 echo "Internet OK."
 
-# Show distro menu
+# --- Distro selection ---
 echo ""
 echo "Available distros:"
 echo "================================"
 i=1
 while IFS='|' read -r NAME URL; do
-  case "$NAME" in "#"*) continue ;; "") continue ;; esac
+  case "$NAME" in ""|\#*) continue ;; esac
   echo "$i) $NAME"
   i=$((i + 1))
 done < /opt/config/distros.conf
 echo "================================"
-printf "Enter number to download (or q to quit): "
+printf "Enter number (or q): "
 read CHOICE
 
-[ "$CHOICE" = "q" ] && echo "Exiting." && exit 0
+[ "$CHOICE" = "q" ] && exit 0
 
+# resolve selection
 i=1
 ISO_URL=""
 ISO_NAME=""
 while IFS='|' read -r NAME URL; do
-  case "$NAME" in "#"*) continue ;; "") continue ;; esac
+  case "$NAME" in ""|\#*) continue ;; esac
   if [ "$i" = "$CHOICE" ]; then
     ISO_NAME="$NAME"
     ISO_URL="$URL"
@@ -112,96 +114,59 @@ while IFS='|' read -r NAME URL; do
   i=$((i + 1))
 done < /opt/config/distros.conf
 
-if [ -z "$ISO_URL" ]; then
-  echo "Invalid selection. Exiting."
-  exit 1
-fi
+[ -z "$ISO_URL" ] && echo "Invalid selection." && exit 1
 
-echo ""
 echo "Selected: $ISO_NAME"
-echo "URL: $ISO_URL"
+
 printf "Download to /tmp/downloaded.iso? (y/n): "
 read CONFIRM
-[ "$CONFIRM" != "y" ] && echo "Cancelled." && exit 0
+[ "$CONFIRM" != "y" ] && exit 0
 
-echo "Downloading..."
 wget -O /tmp/downloaded.iso "$ISO_URL"
-echo ""
-echo "Download complete: /tmp/downloaded.iso"
 
-echo ""
-echo "================================"
-echo "            WARNING             "
-echo "================================"
-echo "This will ERASE a disk completely."
-echo "ALL DATA on the selected drive will be LOST."
-echo "================================"
-echo ""
-
-ROOT_DEV=$(mount | grep " on / " | awk '{print $1}' | sed 's/[0-9]*$//')
+# --- Drive detection ---
+ROOT_DEV=$(mount | awk '$3=="/" {print $1}' | sed 's/[0-9]*$//')
 ROOT_DEV=$(basename "$ROOT_DEV")
-echo "System disk detected: /dev/$ROOT_DEV"
-echo "(This disk will NOT be recommended)"
-echo ""
 
-echo "Detecting drives..."
-echo ""
+echo "System disk: /dev/$ROOT_DEV"
+
+echo "Available drives:"
 DRIVES=""
-echo "Fallback: scanning /sys/block"
 for dev in /sys/block/*; do
   NAME=$(basename "$dev")
   case "$NAME" in loop*|ram*) continue ;; esac
-  SIZE=$(cat "$dev/size" 2>/dev/null)
+  SIZE=$(cat "$dev/size" 2>/dev/null || echo 0)
   SIZE_GB=$((SIZE / 2048 / 1024))
   echo "/dev/$NAME - ${SIZE_GB}GB"
   DRIVES="$DRIVES $NAME"
 done
 
-echo ""
-echo "--------------------------------"
-
+# recommend smallest non-root
 RECOMMENDED=""
-SMALLEST_SIZE=999999999999
+SMALLEST=999999999999
 for NAME in $DRIVES; do
   [ "$NAME" = "$ROOT_DEV" ] && continue
-  if [ -f "/sys/block/$NAME/size" ]; then
-    SIZE=$(cat "/sys/block/$NAME/size" 2>/dev/null)
-    if [ "$SIZE" -lt "$SMALLEST_SIZE" ]; then
-      SMALLEST_SIZE="$SIZE"
-      RECOMMENDED="$NAME"
-    fi
-  fi
+  SIZE=$(cat "/sys/block/$NAME/size" 2>/dev/null || echo 0)
+  [ "$SIZE" -lt "$SMALLEST" ] && SMALLEST="$SIZE" && RECOMMENDED="$NAME"
 done
 
-echo "Recommended (smallest non-system drive): /dev/$RECOMMENDED"
-echo ""
+echo "Recommended: /dev/$RECOMMENDED"
 
-printf "Enter target drive (example: sdb, nvme0n1): "
+printf "Target drive: "
 read TARGET
-
-[ -z "$TARGET" ] && echo "No drive selected. Exiting." && exit 1
 
 TARGET_PATH="/dev/$TARGET"
 
-[ ! -b "$TARGET_PATH" ] && echo "Invalid block device: $TARGET_PATH" && exit 1
-[ "$TARGET" = "$ROOT_DEV" ] && echo "Refusing to write to system disk." && exit 1
+[ ! -b "$TARGET_PATH" ] && echo "Invalid device" && exit 1
+[ "$TARGET" = "$ROOT_DEV" ] && echo "Refusing system disk" && exit 1
 
-echo ""
-echo "You selected: $TARGET_PATH"
-echo ""
-echo "FINAL WARNING: This will DESTROY ALL DATA on $TARGET_PATH"
-printf "Type 'YES' to continue: "
-read FINAL_CONFIRM
+printf "Type YES to confirm: "
+read FINAL
+[ "$FINAL" != "YES" ] && exit 0
 
-[ "$FINAL_CONFIRM" != "YES" ] && echo "Cancelled." && exit 0
-
-echo ""
-echo "Writing ISO to $TARGET_PATH..."
-echo "This may take a while..."
+# --- Write image ---
+echo "Writing..."
 dd if=/tmp/downloaded.iso of="$TARGET_PATH" bs=4M status=progress oflag=sync
 sync
 
-echo ""
-echo "================================"
-echo "Done! You can now boot from $TARGET_PATH"
-echo "================================"
+echo "Done. Boot from $TARGET_PATH"
