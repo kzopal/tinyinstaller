@@ -71,6 +71,12 @@ for cmd in sh ash ls cat mkdir mount umount echo sleep ip udhcpc; do
 done
 cd "$BUILD_DIR"
 
+#net
+for m in /sys/bus/*/devices/*/modalias; do
+  [ -f "$m" ] || continue
+  modprobe "$(cat "$m")" 2>/dev/null
+done
+
 # ================================
 # CREATE INIT SCRIPT
 # ================================
