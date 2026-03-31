@@ -1,4 +1,3 @@
-cat > /root/tinyinstaller/initrd/opt/tinyinstaller.sh << 'EOF'
 #!/bin/sh
 # tinyinstaller - minimal network ISO installer
 # License: AGPL-3.0
@@ -176,5 +175,3 @@ echo ""
 echo "================================"
 echo "Done! You can now boot from $TARGET_PATH"
 echo "================================"
-EOF
-chmod +x /root/tinyinstaller/initrd/opt/tinyinstaller.sh
