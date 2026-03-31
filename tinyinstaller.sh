@@ -6,6 +6,36 @@ echo "================================"
 echo "       TinyInstaller v0.1       "
 echo "================================"
 
+# Dynamically load drivers for all detected network hardware
+echo "Probing network hardware..."
+
+# PCI devices (covers physical, QEMU, VirtualBox, VMware)
+for modalias in /sys/bus/pci/devices/*/modalias; do
+  [ -f "$modalias" ] && modprobe -q $(cat "$modalias") 2>/dev/null
+done
+
+# USB devices (USB WiFi dongles, USB-to-Ethernet adapters)
+for modalias in /sys/bus/usb/devices/*/modalias; do
+  [ -f "$modalias" ] && modprobe -q $(cat "$modalias") 2>/dev/null
+done
+
+# Platform/virtio devices (some ARM boards, VirtIO-only guests)
+for modalias in /sys/bus/platform/devices/*/modalias; do
+  [ -f "$modalias" ] && modprobe -q $(cat "$modalias") 2>/dev/null
+done
+
+# Wait for kernel to register new interfaces
+sleep 2
+[ -x /sbin/mdev ] && mdev -s
+[ -x /sbin/udevadm ] && udevadm trigger && udevadm settle
+
+# Explicitly bring up any newly appeared interfaces so they show in /sys/class/net/
+for iface in /sys/class/net/*/; do
+  iface=$(basename "$iface")
+  [ "$iface" = "lo" ] || [ "$iface" = "*" ] && continue
+  ip link set "$iface" up 2>/dev/null
+done
+
 # Detect and select network interface
 echo ""
 echo "Available network interfaces:"
