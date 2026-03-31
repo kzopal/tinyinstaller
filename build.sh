@@ -37,6 +37,7 @@ mkdir -p "$ISO_DIR"/boot/isolinux
 echo "[3/7] Downloading latest tinyinstaller from GitHub..."
 wget -q -O /tmp/tinyinstaller.zip "$REPO_URL"
 unzip -q /tmp/tinyinstaller.zip -d /tmp/
+mkdir -p "$INITRD_DIR/opt" "$INITRD_DIR/opt/scripts" "$INITRD_DIR/opt/config"
 cp /tmp/tinyinstaller-main/tinyinstaller.sh "$INITRD_DIR/opt/tinyinstaller.sh"
 cp /tmp/tinyinstaller-main/scripts/detect_network.sh "$INITRD_DIR/opt/scripts/detect_network.sh"
 cp /tmp/tinyinstaller-main/scripts/detect_keyboard.sh "$INITRD_DIR/opt/scripts/detect_keyboard.sh"
