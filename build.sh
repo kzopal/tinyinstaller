@@ -12,6 +12,13 @@ OUTPUT_ISO="/root/tinyinstaller.iso"
 REPO_URL="https://github.com/kzopal/tinyinstaller/archive/refs/heads/main.zip"
 KERNEL_URL="http://distro.ibiblio.org/tinycorelinux/17.x/x86_64/release/distribution_files/vmlinuz64"
 
+# --- Validate paths ---
+[ -n "$BUILD_DIR" ] || { echo "BUILD_DIR empty"; exit 1; }
+case "$BUILD_DIR" in
+  /*) ;;
+  *) echo "BUILD_DIR must be absolute"; exit 1 ;;
+esac
+
 echo "================================"
 echo "   TinyInstaller ISO Builder    "
 echo "================================"
@@ -24,24 +31,38 @@ apt-get update -y > /dev/null
 apt-get install -y busybox-static cpio gzip xorriso isolinux syslinux wget curl unzip > /dev/null
 
 # ================================
-# CLEAN OLD BUILD
+# CLEAN + CREATE BUILD TREE
 # ================================
-echo "[2/7] Cleaning old build..."
+echo "[2/7] Preparing build tree..."
 rm -rf "$BUILD_DIR"
-mkdir -p "$INITRD_DIR"/{bin,dev,etc,proc,sys,tmp,opt/scripts,opt/config}
-mkdir -p "$ISO_DIR"/boot/isolinux
+
+# create everything upfront (prevents all cp failures)
+mkdir -p \
+  "$INITRD_DIR/bin" \
+  "$INITRD_DIR/dev" \
+  "$INITRD_DIR/etc" \
+  "$INITRD_DIR/proc" \
+  "$INITRD_DIR/sys" \
+  "$INITRD_DIR/tmp" \
+  "$INITRD_DIR/opt/scripts" \
+  "$INITRD_DIR/opt/config" \
+  "$ISO_DIR/boot/isolinux"
 
 # ================================
 # DOWNLOAD LATEST REPO
 # ================================
-echo "[3/7] Downloading latest tinyinstaller from GitHub..."
+echo "[3/7] Downloading tinyinstaller..."
 wget -q -O /tmp/tinyinstaller.zip "$REPO_URL"
 unzip -q /tmp/tinyinstaller.zip -d /tmp/
+
+# ensure dirs exist (defensive, idempotent)
 mkdir -p "$INITRD_DIR/opt" "$INITRD_DIR/opt/scripts" "$INITRD_DIR/opt/config"
+
 cp /tmp/tinyinstaller-main/tinyinstaller.sh "$INITRD_DIR/opt/tinyinstaller.sh"
-cp /tmp/tinyinstaller-main/scripts/detect_network.sh "$INITRD_DIR/opt/scripts/detect_network.sh"
-cp /tmp/tinyinstaller-main/scripts/detect_keyboard.sh "$INITRD_DIR/opt/scripts/detect_keyboard.sh"
-cp /tmp/tinyinstaller-main/config/distros.conf "$INITRD_DIR/opt/config/distros.conf"
+cp /tmp/tinyinstaller-main/scripts/detect_network.sh "$INITRD_DIR/opt/scripts/"
+cp /tmp/tinyinstaller-main/scripts/detect_keyboard.sh "$INITRD_DIR/opt/scripts/"
+cp /tmp/tinyinstaller-main/config/distros.conf "$INITRD_DIR/opt/config/"
+
 rm -rf /tmp/tinyinstaller-main /tmp/tinyinstaller.zip
 
 # Fix paths and remove sudo
@@ -52,12 +73,13 @@ sed -i 's/sudo //g' "$INITRD_DIR/opt/tinyinstaller.sh" "$INITRD_DIR/opt/scripts/
 chmod +x "$INITRD_DIR/opt/tinyinstaller.sh" "$INITRD_DIR/opt/scripts/"*.sh
 
 # ================================
-# SET UP BUSYBOX
+# SET UP BUSYBOX (static only)
 # ================================
 echo "[4/7] Setting up busybox..."
 cp /bin/busybox "$INITRD_DIR/bin/busybox"
+
 cd "$INITRD_DIR/bin"
-for cmd in sh ash ls cat mkdir mount umount echo sleep ip udhcpc wget; do
+for cmd in sh ash ls cat mkdir mount umount echo sleep ip udhcpc wget grep basename; do
   ln -sf busybox "$cmd"
 done
 cd "$BUILD_DIR"
@@ -73,10 +95,10 @@ cat > "$INITRD_DIR/init" << 'INITEOF'
 /bin/busybox mount -t sysfs none /sys
 /bin/busybox mount -t devtmpfs none /dev || /bin/busybox mdev -s
 
-# minimal DNS fallback
+# DNS fallback
 echo "nameserver 1.1.1.1" > /etc/resolv.conf
 
-# load kernel modules via modalias
+# load modules
 for m in /sys/bus/*/devices/*/modalias; do
   [ -f "$m" ] || continue
   modprobe "$(cat "$m")" 2>/dev/null
@@ -86,11 +108,11 @@ done
 for i in /sys/class/net/*; do
   iface=$(basename "$i")
   [ "$iface" = "lo" ] && continue
-  /bin/busybox ip link set "$iface" up 2>/dev/null
+  ip link set "$iface" up 2>/dev/null
 done
 
-# simple interface list (no eval)
-set -- $(/bin/busybox ls /sys/class/net/ | /bin/busybox grep -v '^lo$')
+# build interface list safely
+set -- $(ls /sys/class/net/ | grep -v '^lo$')
 
 echo "Available network interfaces:"
 echo "================================"
@@ -103,7 +125,6 @@ echo "================================"
 printf "Choose interface number: "
 read IFACE_CHOICE
 
-# resolve selection
 n=1
 for iface in "$@"; do
   if [ "$n" = "$IFACE_CHOICE" ]; then
@@ -113,22 +134,22 @@ for iface in "$@"; do
   n=$((n + 1))
 done
 
-[ -z "${NET_IF:-}" ] && echo "Invalid choice." && exec /bin/busybox sh
+[ -z "${NET_IF:-}" ] && echo "Invalid choice" && exec sh
 
-echo "Bringing up $NET_IF..."
-/bin/busybox ip link set "$NET_IF" up
-/bin/busybox udhcpc -i "$NET_IF" -q -t 10
+ip link set "$NET_IF" up
+udhcpc -i "$NET_IF" -q -t 10
 
 cd /opt
-/bin/busybox sh tinyinstaller.sh
-/bin/busybox sh
+sh tinyinstaller.sh
+sh
 INITEOF
+
 chmod +x "$INITRD_DIR/init"
 
 # ================================
 # DOWNLOAD KERNEL
 # ================================
-echo "[6/7] Downloading kernel and packing initrd..."
+echo "[6/7] Downloading kernel..."
 wget -q -O "$ISO_DIR/boot/vmlinuz" "$KERNEL_URL"
 
 # ================================
@@ -141,7 +162,9 @@ cd "$BUILD_DIR"
 # ================================
 # SET UP BOOTLOADER
 # ================================
-cp /usr/lib/ISOLINUX/isolinux.bin "$ISO_DIR/boot/isolinux/" || cp /usr/lib/syslinux/isolinux.bin "$ISO_DIR/boot/isolinux/"
+cp /usr/lib/ISOLINUX/isolinux.bin "$ISO_DIR/boot/isolinux/" 2>/dev/null || \
+cp /usr/lib/syslinux/isolinux.bin "$ISO_DIR/boot/isolinux/"
+
 cp /usr/lib/syslinux/modules/bios/ldlinux.c32 "$ISO_DIR/boot/isolinux/"
 chmod 644 "$ISO_DIR/boot/isolinux/isolinux.bin"
 
@@ -171,6 +194,3 @@ echo "Build complete!"
 echo "ISO: $OUTPUT_ISO"
 echo "Size: $(du -sh "$OUTPUT_ISO" | cut -f1)"
 echo "================================"
-echo ""
-echo "Test with:"
-echo "qemu-system-x86_64 -cdrom $OUTPUT_ISO -m 512M -boot d -netdev user,id=net0 -device e1000,netdev=net0"
