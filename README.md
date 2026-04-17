@@ -10,8 +10,14 @@ tinyinstaller is a script that lets you choose from a large range of linux distr
 - Internet connection (wired recommended)
 - Target disk with enough space for your chosen distro
 
+### Prerequisites
+If `udhcpc` is not found, install BusyBox and symlink its applets:
+```sh
+sudo apt install busybox
+sudo busybox --install -s /usr/local/bin
+```
+
 ## Usage
-You might need to install busybox
 ```sh
 cd tinyinstaller
 sh tinyinstaller.sh
