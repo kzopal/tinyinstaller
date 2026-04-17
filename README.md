@@ -11,6 +11,7 @@ tinyinstaller is a script that lets you choose from a large range of linux distr
 - Target disk with enough space for your chosen distro
 
 ## Usage
+You might need to install busybox
 ```sh
 cd tinyinstaller
 sh tinyinstaller.sh
