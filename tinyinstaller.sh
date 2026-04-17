@@ -2,7 +2,16 @@
 # tinyinstaller - minimal network ISO installer
 # License: AGPL-3.0
 
+# hopefully this works
 set -eu
+if ! command -v udhcpc >/dev/null 2>&1; then
+  if command -v dhclient >/dev/null 2>&1; then
+    udhcpc() { dhclient "$2"; }
+  else
+    echo "Error: udhcpc not found."
+    exit 1
+  fi
+fi
 
  echo "================================"
  echo "       TinyInstaller v0.1       "
