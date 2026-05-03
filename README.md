@@ -1,4 +1,4 @@
-# tinyinstaller
+# tinyinstaller - project abandoned
 A internet installer for big ISOs with tiny USB drives.
 Use the script or burn the provided ISO to a USB drive.
 
